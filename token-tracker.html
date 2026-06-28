@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Claude Token Tracker · Live</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/date-fns@3.6.0/cdn.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style>
+  :root {
+    --bg-0: #0a0e1a;
+    --bg-1: #121829;
+    --panel: rgba(24, 31, 51, 0.55);
+    --panel-border: rgba(255, 255, 255, 0.08);
+    --text: #e7ecf5;
+    --muted: #8a96b0;
+    --accent: #ff8a4c;
+    --accent-2: #4cc9f0;
+    --good: #5cdb95;
+    --shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+    --radius: 18px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    font-family: "Segoe UI", system-ui, sans-serif;
+    color: var(--text);
+    min-height: 100vh;
+    background:
+      radial-gradient(1200px 700px at 12% -10%, rgba(76, 201, 240, 0.10), transparent 60%),
+      radial-gradient(1000px 600px at 110% 10%, rgba(255, 138, 76, 0.12), transparent 55%),
+      linear-gradient(160deg, var(--bg-0), var(--bg-1) 60%, #0b0f1d);
+    background-attachment: fixed;
+    padding: 28px clamp(16px, 4vw, 48px) 60px;
+  }
+
+  h1, h2, h3 { margin: 0; font-weight: 700; letter-spacing: -0.02em; }
+
+  .display-font {
+    font-family: "Georgia", "Times New Roman", serif;
+    font-style: italic;
+  }
+
+  /* ---------- Header ---------- */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-bottom: 26px;
+  }
+
+  .brand { display: flex; flex-direction: column; gap: 4px; }
+  .brand h1 { font-size: clamp(26px, 3.4vw, 40px); }
+  .brand .sub { color: var(--muted); font-size: 14px; display: flex; align-items: center; gap: 9px; }
+
+  .live-dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--muted); box-shadow: 0 0 0 0 rgba(92, 219, 149, 0.6);
+  }
+  .live-dot.on {
+    background: var(--good);
+    animation: pulse 1.8s infinite;
+  }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(92, 219, 149, 0.55); }
+    70%  { box-shadow: 0 0 0 11px rgba(92, 219, 149, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(92, 219, 149, 0); }
+  }
+
+  .header-spacer { flex: 1 1 40px; }
+
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+  button.btn {
+    font: inherit;
+    font-weight: 600;
+    color: #1b1205;
+    background: linear-gradient(135deg, #ffb27a, var(--accent));
+    border: none;
+    padding: 11px 20px;
+    border-radius: 12px;
+    cursor: pointer;
+    box-shadow: 0 8px 22px rgba(255, 138, 76, 0.30);
+    transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s;
+  }
+  button.btn:hover { transform: translateY(-1px); box-shadow: 0 12px 28px rgba(255, 138, 76, 0.42); }
+  button.btn:active { transform: translateY(0); }
+  button.btn.ghost {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--panel-border);
+    box-shadow: none;
+  }
+  button.btn:disabled { opacity: 0.45; cursor: default; transform: none; box-shadow: none; }
+
+  .stamp { color: var(--muted); font-size: 12.5px; min-width: 130px; text-align: right; }
+
+  /* ---------- Countdown ring ---------- */
+  .ring-wrap {
+    display: flex; align-items: center; gap: 16px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius);
+    padding: 14px 20px 14px 16px;
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(14px);
+  }
+  .ring { position: relative; width: 92px; height: 92px; }
+  .ring svg { transform: rotate(-90deg); }
+  .ring .track { stroke: rgba(255,255,255,0.08); }
+  .ring .prog { stroke: url(#ringGrad); stroke-linecap: round; transition: stroke-dashoffset 0.6s ease; filter: drop-shadow(0 0 6px rgba(255,138,76,0.5)); }
+  .ring .label {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 1px;
+  }
+  .ring .time { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .ring .cap { font-size: 9px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+  .ring-meta { display: flex; flex-direction: column; gap: 3px; }
+  .ring-meta .t { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; }
+  .ring-meta .v { font-size: 18px; font-weight: 700; }
+  .ring-meta .v small { font-weight: 500; color: var(--muted); font-size: 12px; }
+
+  /* ---------- Banner / empty state ---------- */
+  .notice {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    margin-bottom: 22px;
+    color: var(--muted);
+    font-size: 14px;
+    display: flex; gap: 12px; align-items: flex-start;
+    backdrop-filter: blur(14px);
+  }
+  .notice strong { color: var(--text); }
+  .notice.hidden { display: none; }
+  .notice .x { color: var(--accent); font-size: 18px; line-height: 1.2; }
+
+  /* ---------- Filters ---------- */
+  .filters { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 22px; align-items: flex-end; }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  select {
+    font: inherit; color: var(--text);
+    background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 11px; padding: 9px 14px; min-width: 190px; cursor: pointer;
+    backdrop-filter: blur(8px);
+  }
+  select:focus { outline: 2px solid rgba(255,138,76,0.5); }
+
+  /* ---------- Cards grid ---------- */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius);
+    padding: 20px 22px;
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(14px);
+    position: relative; overflow: hidden;
+  }
+  .card::after {
+    content: ""; position: absolute; right: -30px; top: -30px;
+    width: 110px; height: 110px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,138,76,0.16), transparent 70%);
+  }
+  .card .k { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.09em; margin-bottom: 8px; }
+  .card .v { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .card .v small { font-size: 14px; font-weight: 600; color: var(--muted); }
+  .card.accent .v { color: var(--accent); }
+  .card.cyan .v { color: var(--accent-2); }
+  .card.green .v { color: var(--good); }
+
+  /* ---------- Section ---------- */
+  .grid { display: grid; gap: 18px; }
+  .grid.two { grid-template-columns: 1.4fr 1fr; }
+  @media (max-width: 900px) { .grid.two { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius);
+    padding: 20px 22px;
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(14px);
+    margin-bottom: 18px;
+  }
+  .panel h2 { font-size: 16px; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .panel h2 .pill { font-size: 11px; font-weight: 600; color: var(--muted); background: rgba(255,255,255,0.06); padding: 3px 9px; border-radius: 20px; }
+
+  .chart-box { position: relative; height: 320px; }
+  .chart-box.tall { height: 360px; }
+
+  /* ---------- Table ---------- */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: right; padding: 11px 10px; border-bottom: 1px solid rgba(255,255,255,0.06); font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer; user-select: none; white-space: nowrap; }
+  th:hover { color: var(--text); }
+  tbody tr:hover { background: rgba(255,255,255,0.03); }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: middle; }
+  .model-name { font-weight: 600; }
+  .flag { color: var(--accent); font-size: 11px; margin-left: 6px; }
+  tfoot td, .total-row td { font-weight: 800; border-top: 2px solid rgba(255,255,255,0.12); border-bottom: none; }
+
+  .muted { color: var(--muted); }
+  .footnote { color: var(--muted); font-size: 12px; margin-top: 30px; text-align: center; line-height: 1.7; }
+  a { color: var(--accent-2); }
+
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1><span class="display-font">Claude</span> Token Tracker</h1>
+    <div class="sub"><span class="live-dot" id="liveDot"></span><span id="liveText">Not connected</span></div>
+  </div>
+  <div class="header-spacer"></div>
+
+  <div class="ring-wrap" title="Time left in the current rolling 5-hour usage window">
+    <div class="ring">
+      <svg width="92" height="92" viewBox="0 0 92 92">
+        <defs>
+          <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#4cc9f0"/>
+            <stop offset="100%" stop-color="#ff8a4c"/>
+          </linearGradient>
+        </defs>
+        <circle class="track" cx="46" cy="46" r="40" fill="none" stroke-width="9"/>
+        <circle class="prog" id="ringProg" cx="46" cy="46" r="40" fill="none" stroke-width="9"
+                stroke-dasharray="251.3" stroke-dashoffset="251.3"/>
+      </svg>
+      <div class="label">
+        <div class="time" id="ringTime">—:—:—</div>
+        <div class="cap">5h window</div>
+      </div>
+    </div>
+    <div class="ring-meta">
+      <div><div class="t">Window tokens</div><div class="v" id="winTokens">—</div></div>
+      <div><div class="t">Window cost</div><div class="v" id="winCost">—</div></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn" id="connectBtn">Connect folder</button>
+    <button class="btn ghost" id="refreshBtn" disabled>Refresh</button>
+    <div class="stamp" id="stamp"></div>
+  </div>
+</header>
+
+<div class="notice" id="notice">
+  <span class="x">▹</span>
+  <div>
+    <strong>Connect your Claude data folder to begin.</strong><br>
+    Click <strong>Connect folder</strong>, then paste the path below into the file-picker address bar:
+    <span style="display:inline-flex;align-items:center;gap:8px;margin:7px 0 4px;background:rgba(0,0,0,0.35);padding:6px 12px;border-radius:9px;vertical-align:middle">
+      <code id="defaultFolderPath" style="font-size:13px;user-select:all;letter-spacing:0.01em">C:\Users\nils-\.claude\projects</code>
+      <button id="copyPathBtn" onclick="navigator.clipboard.writeText(document.getElementById('defaultFolderPath').textContent).then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy path',1500)})"
+        style="font:inherit;font-size:11px;font-weight:600;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);color:var(--text);padding:3px 9px;border-radius:6px;cursor:pointer;white-space:nowrap">Copy path</button>
+    </span>
+    <br>The dashboard reads local JSONL transcripts and auto-refreshes. After the first connection it reconnects automatically. Nothing leaves your machine.
+    <br><span class="muted">Requires Microsoft Edge or Google Chrome (File System Access API).</span>
+  </div>
+</div>
+
+<div class="filters" id="filters" style="display:none">
+  <div class="field">
+    <label for="projectSel">Project</label>
+    <select id="projectSel"><option value="*">All projects</option></select>
+  </div>
+  <div class="field">
+    <label for="modelSel">Model</label>
+    <select id="modelSel"><option value="*">All models</option></select>
+  </div>
+  <div class="field">
+    <label for="pollSel">Auto-refresh</label>
+    <select id="pollSel">
+      <option value="5000" selected>Every 5 s</option>
+      <option value="15000">Every 15 s</option>
+      <option value="60000">Every 60 s</option>
+      <option value="0">Off</option>
+    </select>
+  </div>
+</div>
+
+<div class="stats" id="stats" style="display:none">
+  <div class="card accent"><div class="k">Input + Output tokens</div><div class="v" id="cTokens">0</div><div class="k" id="cCacheNote" style="margin-top:4px;font-size:11px;opacity:.65"></div></div>
+  <div class="card green"><div class="k">Est. cost <span id="costNote" style="font-size:10px;font-weight:400;opacity:.7">(API list prices)</span></div><div class="v" id="cCost">$0.00</div></div>
+  <div class="card cyan"><div class="k">Sessions</div><div class="v" id="cSessions">0</div><div class="k" id="cDateRange" style="margin-top:4px;font-size:11px;opacity:.65"></div></div>
+  <div class="card"><div class="k">Models used</div><div class="v" id="cModels">0</div></div>
+</div>
+
+<div id="dash" style="display:none">
+  <div class="panel">
+    <h2>Usage by model <span class="pill" id="modelPill"></span></h2>
+    <table id="modelTable">
+      <thead>
+        <tr>
+          <th data-sort="model">Model</th>
+          <th data-sort="input">Input</th>
+          <th data-sort="output">Output</th>
+          <th data-sort="cacheCreate">Cache write</th>
+          <th data-sort="cacheRead">Cache read</th>
+          <th data-sort="total">Total</th>
+          <th data-sort="share">Share</th>
+          <th data-sort="cost">Est. cost</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="grid two">
+    <div class="panel">
+      <h2>Tokens per session <span class="pill">by model</span></h2>
+      <div class="chart-box tall"><canvas id="sessionChart"></canvas></div>
+    </div>
+    <div class="panel">
+      <h2>Token share <span class="pill">by model</span></h2>
+      <div class="chart-box tall"><canvas id="modelChart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Cumulative tokens over time <span class="pill">total</span></h2>
+    <div class="chart-box"><canvas id="timeChart"></canvas></div>
+  </div>
+
+  <div class="grid two">
+    <div class="panel">
+      <h2>Last 10 prompts <span class="pill">by time</span></h2>
+      <table id="recentTable" class="prompt-table">
+        <thead><tr>
+          <th style="text-align:left">Time</th><th style="text-align:left">Model</th><th>Input</th><th>Output</th><th>Cost</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <h2>10 most expensive prompts <span class="pill">all time</span></h2>
+      <table id="expensiveTable" class="prompt-table">
+        <thead><tr>
+          <th style="text-align:left">Time</th><th style="text-align:left">Model</th><th>Input</th><th>Output</th><th>Cost</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="footnote">
+  <strong>Cost estimate:</strong> input tokens × input price + output tokens × output price, using
+  public list prices from <em>platform.claude.com/docs/about-claude/models/overview</em>.
+  Cache tokens are shown in the table for reference but not included in the cost figure.
+  Token data is read locally from Claude Code transcripts — nothing leaves your machine.<br>
+  The 5-hour countdown reflects Claude's rolling usage window: a new window opens after a gap of more than 5 hours.
+</div>
+
+<script>
+/* ============================ Pricing ============================ */
+/* USD per 1,000,000 tokens — source: platform.claude.com/docs/about-claude/models/overview */
+const PRICING = {
+  /* Current */
+  "claude-fable-5":        { in: 10, out: 50  },
+  "claude-mythos-5":       { in: 10, out: 50  },
+  "claude-opus-4-8":       { in: 5,  out: 25  },
+  "claude-sonnet-4-6":     { in: 3,  out: 15  },
+  "claude-haiku-4-5":      { in: 1,  out: 5   },
+  /* Legacy */
+  "claude-opus-4-7":       { in: 5,  out: 25  },
+  "claude-opus-4-6":       { in: 5,  out: 25  },
+  "claude-opus-4-5":       { in: 5,  out: 25  },
+  "claude-sonnet-4-5":     { in: 3,  out: 15  },
+  "claude-opus-4-1":       { in: 15, out: 75  },
+  "claude-sonnet-4-0":     { in: 3,  out: 15  },
+  "claude-opus-4-0":       { in: 15, out: 75  },
+};
+const FALLBACK_PRICE = { in: 5, out: 25 }; // unknown model → Opus-tier
+const WINDOW_MS = 5 * 60 * 60 * 1000;
+
+const MODEL_COLORS = [
+  "#ff8a4c", "#4cc9f0", "#5cdb95", "#c792ea",
+  "#ffd166", "#ef476f", "#06d6a0", "#a0aec0",
+];
+
+/* ============================ State ============================ */
+let dirHandle = null;
+const fileMeta = new Map();   // path -> { size, lastModified }
+const records = [];           // every assistant usage record
+const seenKeys = new Set();   // dedupe
+let pollTimer = null;
+let charts = {};
+let sortState = { key: "total", dir: -1 };
+
+
+/* ============================ Helpers ============================ */
+const byId = (id) => document.getElementById(id);
+
+/* Strip a trailing -YYYYMMDD snapshot suffix so "claude-haiku-4-5-20251001"
+   resolves to "claude-haiku-4-5". */
+function normalizeModel(model) {
+  const m = PRICING[model] ? model : model.replace(/-\d{8}$/, "");
+  return m;
+}
+function priceFor(model) { return PRICING[normalizeModel(model)] || FALLBACK_PRICE; }
+function isKnown(model) { return !!PRICING[normalizeModel(model)]; }
+
+function recordCost(r) {
+  const p = priceFor(r.model);
+  return r.input * (p.in / 1e6) + r.output * (p.out / 1e6);
+}
+
+function fmtInt(n) { return Math.round(n).toLocaleString("en-US"); }
+function fmtTokens(n) {
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
+  return fmtInt(n);
+}
+function fmtCost(n) {
+  if (n >= 1000) return "$" + n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  return "$" + n.toFixed(2);
+}
+function shortId(id) { return id ? id.slice(0, 8) : "—"; }
+
+/* ============================ Loading ============================ */
+function showError(msg) {
+  let el = byId("connectError");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "connectError";
+    el.style.cssText = "background:rgba(239,71,111,0.15);border:1px solid rgba(239,71,111,0.45);border-radius:12px;padding:14px 18px;margin-bottom:18px;color:#ef476f;font-size:14px;line-height:1.5;";
+    byId("notice").after(el);
+  }
+  el.innerHTML = msg;
+  el.style.display = "block";
+}
+function clearError() {
+  const el = byId("connectError");
+  if (el) el.style.display = "none";
+}
+
+/* ============================ Persistence (IndexedDB) ============================ */
+/* Browsers let us store FileSystemHandle objects in IDB and restore them later.
+   On the same session permission is still 'granted'. On a fresh session it is
+   'prompt', so connect() calls requestPermission() (needs one user click) instead
+   of re-opening the full folder-picker. */
+const IDB_NAME = "tokenTracker", IDB_STORE = "handles";
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(IDB_NAME, 1);
+    r.onupgradeneeded = e => e.target.result.createObjectStore(IDB_STORE);
+    r.onsuccess = e => res(e.target.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function idbGet(key) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, "readonly");
+    const r = tx.objectStore(IDB_STORE).get(key);
+    r.onsuccess = () => res(r.result ?? null);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function idbSet(key, val) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).put(val, key);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}
+
+function activateDashboard() {
+  byId("notice").classList.add("hidden");
+  byId("filters").style.display = "flex";
+  byId("stats").style.display = "grid";
+  byId("dash").style.display = "block";
+  byId("refreshBtn").disabled = false;
+  byId("liveDot").classList.add("on");
+  byId("liveText").textContent = "Connected";
+  if (energyLoaded) showEnergyElements();
+}
+
+async function tryAutoConnect() {
+  try {
+    const savedDir = await idbGet("dirHandle");
+    if (!savedDir) return; // first visit — show normal notice
+    const perm = await savedDir.queryPermission({ mode: "read" });
+    if (perm === "granted") {
+      // Same browser session — connect silently without any prompt
+      dirHandle = savedDir;
+      activateDashboard();
+      await scan();
+      startPolling();
+    } else {
+      // Need a user gesture to call requestPermission — update UI to guide user
+      byId("connectBtn").textContent = "Reconnect";
+      byId("notice").innerHTML =
+        '<span class="x">▹</span>' +
+        '<div><strong>Previously connected to <code>' + escapeHtml(savedDir.name) + '</code>.</strong><br>' +
+        'Click <strong>Reconnect</strong> — a small browser confirmation will appear, then the dashboard loads automatically.' +
+        '<br><span class="muted">Requires Microsoft Edge or Google Chrome (File System Access API).</span></div>';
+    }
+  } catch (e) { console.warn("Auto-connect:", e); }
+}
+
+
+async function connect() {
+  clearError();
+  if (!window.showDirectoryPicker) {
+    showError(
+      "<strong>Browser not supported.</strong><br>" +
+      "The File System Access API is required. Open this page in " +
+      "<strong>Microsoft Edge</strong> or <strong>Google Chrome</strong> — Firefox does not support it."
+    );
+    return;
+  }
+
+  let handle = null;
+
+  // Try to restore the previously-used folder via a lightweight permission popup
+  const savedDir = await idbGet("dirHandle").catch(() => null);
+  if (savedDir) {
+    try {
+      const perm = await savedDir.requestPermission({ mode: "read" });
+      if (perm === "granted") handle = savedDir;
+    } catch {}
+  }
+
+  // Fall back to the full folder picker if no saved handle or permission was denied
+  if (!handle) {
+    try {
+      handle = await window.showDirectoryPicker({ id: "claude-projects", mode: "read" });
+    } catch (e) {
+      showError(
+        "<strong>Could not open folder picker.</strong><br>" +
+        "Error: <code>" + e.name + ": " + (e.message || "(no message)") + "</code><br><br>" +
+        (e.name === "AbortError"
+          ? "The picker was blocked before it opened. This usually means:<br>" +
+            "• Edge is treating the <code>file://</code> page as untrusted. Try the fix below.<br>" +
+            "• Or the file is blocked by Windows (right-click → Properties → Unblock).<br><br>" +
+            "<strong>Quick fix:</strong> In Edge address bar type <code>edge://settings/content/filesystem</code>, make sure 'Ask before allowing sites…' is on (not blocked). Then reload and try again."
+          : "Common fixes:<br>" +
+            "• Open this page in Microsoft Edge or Google Chrome.<br>" +
+            "• If on a managed device, IT policy may block the API.<br>" +
+            "• Try <code>edge://flags/#file-system-access-api</code> → Enabled → Relaunch."
+        )
+      );
+      return;
+    }
+  }
+
+  dirHandle = handle;
+  idbSet("dirHandle", handle).catch(() => {});
+  activateDashboard();
+
+  await scan();
+  startPolling();
+}
+
+async function* walk(handle, path = "") {
+  for await (const entry of handle.values()) {
+    const childPath = path ? path + "/" + entry.name : entry.name;
+    if (entry.kind === "directory") {
+      yield* walk(entry, childPath);
+    } else if (entry.name.endsWith(".jsonl")) {
+      yield { entry, path: childPath };
+    }
+  }
+}
+
+async function scan() {
+  if (!dirHandle) return;
+  let added = 0;
+  for await (const { entry, path } of walk(dirHandle)) {
+    let file;
+    try { file = await entry.getFile(); } catch { continue; }
+    const prev = fileMeta.get(path);
+    if (prev && prev.size === file.size && prev.lastModified === file.lastModified) continue;
+    fileMeta.set(path, { size: file.size, lastModified: file.lastModified });
+
+    const project = path.split("/")[0] || "(root)";
+    try {
+      const text = await file.text();
+      added += ingest(text, project);
+    } catch { /* file mid-write; will retry next tick */ }
+  }
+
+  if (added > 0 || byId("stamp").textContent === "") render();
+  const t = new Date();
+  byId("stamp").textContent = "Updated " + t.toLocaleTimeString();
+}
+
+function ingest(text, project) {
+  let count = 0;
+  const lines = text.split("\n");
+  for (const line of lines) {
+    if (!line || line.charCodeAt(0) !== 123) continue; // fast skip non-{ lines
+    let obj;
+    try { obj = JSON.parse(line); } catch { continue; }
+    const msg = obj.message;
+    if (!msg || !msg.usage || !msg.model) continue;
+    if (msg.model === "<synthetic>") continue; // internal placeholder, no real usage
+    const u = msg.usage;
+    /* One API response can span several JSONL lines (one per content block),
+       each repeating the same usage. Dedupe on the API message id, not the
+       per-line uuid, or usage gets counted multiple times. */
+    let key = (msg.id || "") + "|" + (obj.requestId || "");
+    if (key === "|") key = (obj.uuid || "") + "|" + (obj.timestamp || ""); // fallback for old lines
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+
+    const cc = u.cache_creation || {};
+    records.push({
+      model: normalizeModel(msg.model),
+      project,
+      sessionId: obj.sessionId || "unknown",
+      slug: obj.slug || "",
+      cwd: obj.cwd || "",
+      ts: obj.timestamp ? Date.parse(obj.timestamp) : NaN,
+      input: u.input_tokens || 0,
+      output: u.output_tokens || 0,
+      cacheCreate: u.cache_creation_input_tokens || 0,
+      cache1h: cc.ephemeral_1h_input_tokens || 0,
+      cacheRead: u.cache_read_input_tokens || 0,
+    });
+    count++;
+  }
+  return count;
+}
+
+/* ============================ Filtering ============================ */
+function currentFilter() {
+  return { project: byId("projectSel").value, model: byId("modelSel").value };
+}
+function filtered() {
+  const f = currentFilter();
+  return records.filter(r =>
+    (f.project === "*" || r.project === f.project) &&
+    (f.model === "*" || r.model === f.model)
+  );
+}
+
+function refreshFilterOptions() {
+  const projects = [...new Set(records.map(r => r.project))].sort();
+  const models = [...new Set(records.map(r => r.model))].sort();
+  syncSelect(byId("projectSel"), projects, "All projects");
+  syncSelect(byId("modelSel"), models, "All models");
+}
+function syncSelect(sel, values, allLabel) {
+  const cur = sel.value;
+  const opts = ['<option value="*">' + allLabel + "</option>"];
+  for (const v of values) opts.push(`<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`);
+  sel.innerHTML = opts.join("");
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+}
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
+
+/* ============================ Aggregation ============================ */
+function aggregateByModel(rows) {
+  const map = new Map();
+  for (const r of rows) {
+    let m = map.get(r.model);
+    if (!m) { m = { model: r.model, input:0, output:0, cacheCreate:0, cache1h:0, cacheRead:0, cost:0 }; map.set(r.model, m); }
+    m.input += r.input; m.output += r.output;
+    m.cacheCreate += r.cacheCreate; m.cache1h += r.cache1h; m.cacheRead += r.cacheRead;
+    m.cost += recordCost(r);
+  }
+  for (const m of map.values()) {
+    m.cache = m.cacheCreate + m.cacheRead;
+    m.total = m.input + m.output + m.cacheCreate + m.cacheRead;
+  }
+  return [...map.values()];
+}
+
+function aggregateBySession(rows) {
+  const map = new Map();
+  for (const r of rows) {
+    let s = map.get(r.sessionId);
+    if (!s) { s = { sessionId: r.sessionId, label: "", total: 0, cost: 0, byModel: {}, lastTs: 0 }; map.set(r.sessionId, s); }
+    const tok = r.input + r.output + r.cacheCreate + r.cacheRead;
+    s.total += tok;
+    s.cost += recordCost(r);
+    s.byModel[r.model] = (s.byModel[r.model] || 0) + tok;
+    if (r.ts > s.lastTs) s.lastTs = r.ts;
+    if (!s.label) {
+      const base = r.slug || (r.cwd ? r.cwd.split(/[\\/]/).pop() : "") || r.project;
+      s.label = base;
+    }
+  }
+  return [...map.values()];
+}
+
+/* 5-hour rolling window blocks (ccusage style) */
+function computeWindow(rows) {
+  const ts = rows.map(r => r.ts).filter(t => !isNaN(t)).sort((a, b) => a - b);
+  if (!ts.length) return null;
+  let blockStart = ts[0], prev = ts[0];
+  for (const t of ts) {
+    if (t - prev > WINDOW_MS) blockStart = t; // gap -> new window
+    prev = t;
+  }
+  const now = Date.now();
+  let activeStart = blockStart;
+  if (now - prev > WINDOW_MS) activeStart = null; // window already lapsed while idle
+  return { activeStart, lastActivity: prev };
+}
+
+/* ============================ Rendering ============================ */
+function render() {
+  refreshFilterOptions();
+  const rows = filtered();
+  const byModel = aggregateByModel(rows);
+  const totalTokens = byModel.reduce((a, m) => a + m.total, 0);
+  const totalCost = byModel.reduce((a, m) => a + m.cost, 0);
+  const sessions = aggregateBySession(rows);
+
+  const totalIO = byModel.reduce((a, m) => a + m.input + m.output, 0);
+  const totalCacheRead = byModel.reduce((a, m) => a + m.cacheRead, 0);
+  const totalCacheWrite = byModel.reduce((a, m) => a + m.cacheCreate, 0);
+  byId("cTokens").innerHTML = fmtTokens(totalIO) + ' <small>' + fmtInt(totalIO) + "</small>";
+  byId("cCacheNote").textContent = "+ " + fmtTokens(totalCacheRead) + " cache reads, " + fmtTokens(totalCacheWrite) + " cache writes";
+  byId("cCost").textContent = fmtCost(totalCost);
+  byId("cSessions").textContent = fmtInt(sessions.length);
+  byId("cModels").textContent = byModel.length;
+  // date range
+  const timestamps = rows.map(r => r.ts).filter(t => !isNaN(t));
+  if (timestamps.length) {
+    const earliest = new Date(Math.min(...timestamps));
+    const latest = new Date(Math.max(...timestamps));
+    const days = Math.round((latest - earliest) / 86400000);
+    const fmt = d => d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    byId("cDateRange").textContent = fmt(earliest) + " – " + fmt(latest) + " (" + days + "d)";
+  }
+
+  renderModelTable(byModel, totalTokens);
+  renderSessionChart(sessions, byModel);
+  renderModelChart(byModel);
+  renderTimeChart(rows);
+  renderWindow(rows);
+  renderRecentPrompts(rows);
+  renderExpensivePrompts(rows);
+
+  byId("modelPill").textContent = byModel.length + (byModel.length === 1 ? " model" : " models");
+}
+
+function fmtPromptTime(ts) {
+  if (!ts || isNaN(ts)) return "—";
+  const d = new Date(ts);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
+    " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+function promptTableRows(prompts) {
+  if (!prompts.length) return '<tr><td colspan="5" class="muted">No data.</td></tr>';
+  return prompts.map(r => {
+    const cost = recordCost(r);
+    const model = normalizeModel(r.model);
+    return `<tr>
+      <td style="text-align:left;white-space:nowrap">${fmtPromptTime(r.ts)}</td>
+      <td style="text-align:left;font-size:12px;opacity:.85">${escapeHtml(model)}</td>
+      <td>${fmtInt(r.input)}</td>
+      <td>${fmtInt(r.output)}</td>
+      <td><strong style="color:var(--accent)">${fmtCost(cost)}</strong></td>
+    </tr>`;
+  }).join("");
+}
+
+function renderRecentPrompts(rows) {
+  const sorted = [...rows].filter(r => !isNaN(r.ts)).sort((a, b) => b.ts - a.ts).slice(0, 10);
+  byId("recentTable").querySelector("tbody").innerHTML = promptTableRows(sorted);
+}
+
+function renderExpensivePrompts(rows) {
+  const sorted = [...rows].sort((a, b) => recordCost(b) - recordCost(a)).slice(0, 10);
+  byId("expensiveTable").querySelector("tbody").innerHTML = promptTableRows(sorted);
+}
+
+function modelColor(model, allModels) {
+  const idx = allModels.indexOf(model);
+  return MODEL_COLORS[idx % MODEL_COLORS.length];
+}
+
+function renderModelTable(byModel, totalTokens) {
+  const names = byModel.map(m => m.model);
+  const k = sortState.key, dir = sortState.dir;
+  const sorted = [...byModel].sort((a, b) => {
+    let va, vb;
+    if (k === "model") { va = a.model; vb = b.model; return va < vb ? dir : va > vb ? -dir : 0; }
+    if (k === "share") { va = a.total; vb = b.total; }
+    else va = a[k], vb = b[k];
+    return (va - vb) * dir;
+  });
+
+  const tbody = byId("modelTable").querySelector("tbody");
+  let html = "";
+  for (const m of sorted) {
+    const share = totalTokens ? (m.total / totalTokens * 100) : 0;
+    const color = modelColor(m.model, names);
+    html += `<tr>
+      <td class="model-name"><span class="swatch" style="background:${color}"></span>${escapeHtml(m.model)}${isKnown(m.model) ? "" : '<span class="flag" title="Unknown model — priced at Opus rates">≈</span>'}</td>
+      <td>${fmtInt(m.input)}</td>
+      <td>${fmtInt(m.output)}</td>
+      <td style="opacity:.8">${fmtInt(m.cacheCreate)}</td>
+      <td style="opacity:.65">${fmtInt(m.cacheRead)}</td>
+      <td><strong>${fmtInt(m.total)}</strong></td>
+      <td>${share.toFixed(1)}%</td>
+      <td>${fmtCost(m.cost)}</td>
+    </tr>`;
+  }
+  // total row
+  const t = byModel.reduce((a, m) => ({
+    input: a.input + m.input, output: a.output + m.output,
+    cacheCreate: a.cacheCreate + m.cacheCreate, cacheRead: a.cacheRead + m.cacheRead,
+    total: a.total + m.total, cost: a.cost + m.cost,
+  }), { input:0, output:0, cacheCreate:0, cacheRead:0, total:0, cost:0 });
+  html += `<tr class="total-row">
+      <td>Total</td>
+      <td>${fmtInt(t.input)}</td>
+      <td>${fmtInt(t.output)}</td>
+      <td style="opacity:.8">${fmtInt(t.cacheCreate)}</td>
+      <td style="opacity:.65">${fmtInt(t.cacheRead)}</td>
+      <td>${fmtInt(t.total)}</td>
+      <td>100%</td>
+      <td>${fmtCost(t.cost)}</td>
+    </tr>`;
+  tbody.innerHTML = html || '<tr><td colspan="8" class="muted">No data for this filter.</td></tr>';
+}
+
+const chartFont = { color: "#8a96b0", font: { family: "Segoe UI" } };
+function gridColor() { return "rgba(255,255,255,0.06)"; }
+
+function renderSessionChart(sessions, byModel) {
+  const names = byModel.map(m => m.model);
+  const top = [...sessions].sort((a, b) => b.lastTs - a.lastTs).slice(0, 18).reverse();
+  const labels = top.map(s => (s.label || shortId(s.sessionId)).slice(0, 22));
+  const datasets = names.map(model => ({
+    label: model,
+    data: top.map(s => s.byModel[model] || 0),
+    backgroundColor: modelColor(model, names),
+    borderWidth: 0,
+    stack: "tok",
+  }));
+  upsertChart("sessionChart", {
+    type: "bar",
+    data: { labels, datasets },
+    options: {
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { ...chartFont } },
+        tooltip: { callbacks: { label: c => c.dataset.label + ": " + fmtInt(c.parsed.y) } },
+      },
+      scales: {
+        x: { stacked: true, ticks: { ...chartFont, maxRotation: 60, minRotation: 30 }, grid: { color: gridColor() } },
+        y: { stacked: true, ticks: { ...chartFont, callback: v => fmtTokens(v) }, grid: { color: gridColor() } },
+      },
+    },
+  });
+}
+
+function renderModelChart(byModel) {
+  const names = byModel.map(m => m.model);
+  upsertChart("modelChart", {
+    type: "doughnut",
+    data: {
+      labels: names,
+      datasets: [{
+        data: byModel.map(m => m.total),
+        backgroundColor: names.map(n => modelColor(n, names)),
+        borderColor: "rgba(10,14,26,0.7)", borderWidth: 2,
+      }],
+    },
+    options: {
+      maintainAspectRatio: false,
+      cutout: "58%",
+      plugins: {
+        legend: { position: "bottom", labels: { ...chartFont, boxWidth: 12 } },
+        tooltip: { callbacks: { label: c => c.label + ": " + fmtInt(c.parsed) + " tok" } },
+      },
+    },
+  });
+}
+
+function renderTimeChart(rows) {
+  const withTs = rows.filter(r => !isNaN(r.ts)).sort((a, b) => a.ts - b.ts);
+  let cum = 0;
+  const pts = withTs.map(r => {
+    cum += r.input + r.output + r.cacheCreate + r.cacheRead;
+    return { x: r.ts, y: cum };
+  });
+  upsertChart("timeChart", {
+    type: "line",
+    data: {
+      datasets: [{
+        label: "Cumulative tokens",
+        data: pts,
+        borderColor: "#ff8a4c",
+        backgroundColor: "rgba(255,138,76,0.14)",
+        fill: true, tension: 0.25, pointRadius: 0, borderWidth: 2,
+      }],
+    },
+    options: {
+      maintainAspectRatio: false,
+      parsing: false,
+      plugins: {
+        legend: { labels: { ...chartFont } },
+        tooltip: { callbacks: { label: c => fmtInt(c.parsed.y) + " tokens" } },
+      },
+      scales: {
+        x: { type: "time", time: { unit: "day" }, ticks: { ...chartFont }, grid: { color: gridColor() } },
+        y: { ticks: { ...chartFont, callback: v => fmtTokens(v) }, grid: { color: gridColor() } },
+      },
+    },
+  });
+}
+
+function upsertChart(id, config) {
+  if (typeof Chart === "undefined") return; // CDN unreachable
+  try {
+    if (charts[id]) { charts[id].destroy(); }
+    const ctx = byId(id).getContext("2d");
+    charts[id] = new Chart(ctx, config);
+  } catch (e) {
+    console.warn("Chart '" + id + "' failed to render:", e);
+  }
+}
+
+/* ---- Window / countdown ---- */
+let windowState = null;
+function renderWindow(rows) {
+  windowState = computeWindow(rows);
+  if (!windowState || !windowState.activeStart) {
+    byId("winTokens").textContent = "—";
+    byId("winCost").textContent = "—";
+  } else {
+    const start = windowState.activeStart;
+    const winRows = rows.filter(r => !isNaN(r.ts) && r.ts >= start);
+    const tok = winRows.reduce((a, r) => a + r.input + r.output + r.cacheCreate + r.cacheRead, 0);
+    const cost = winRows.reduce((a, r) => a + recordCost(r), 0);
+    byId("winTokens").innerHTML = fmtTokens(tok);
+    byId("winCost").textContent = fmtCost(cost);
+  }
+  tickRing();
+}
+
+const RING_CIRC = 2 * Math.PI * 40; // 251.3
+function tickRing() {
+  const prog = byId("ringProg");
+  if (!windowState || !windowState.activeStart) {
+    byId("ringTime").textContent = "Idle";
+    prog.style.strokeDashoffset = RING_CIRC;
+    return;
+  }
+  const end = windowState.activeStart + WINDOW_MS;
+  const remaining = end - Date.now();
+  if (remaining <= 0) {
+    byId("ringTime").textContent = "0:00:00";
+    prog.style.strokeDashoffset = RING_CIRC;
+    return;
+  }
+  const frac = remaining / WINDOW_MS; // 1 -> full
+  prog.style.strokeDashoffset = RING_CIRC * (1 - frac);
+  const h = Math.floor(remaining / 3600000);
+  const m = Math.floor((remaining % 3600000) / 60000);
+  const s = Math.floor((remaining % 60000) / 1000);
+  byId("ringTime").textContent = `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+}
+
+/* ============================ Polling ============================ */
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  const ms = parseInt(byId("pollSel").value, 10);
+  if (ms > 0) pollTimer = setInterval(() => scan().catch(() => {}), ms);
+}
+
+/* ============================ Wiring ============================ */
+byId("connectBtn").addEventListener("click", connect);
+byId("refreshBtn").addEventListener("click", () => scan().catch(() => {}));
+byId("projectSel").addEventListener("change", render);
+byId("modelSel").addEventListener("change", render);
+byId("pollSel").addEventListener("change", startPolling);
+byId("modelTable").querySelectorAll("th[data-sort]").forEach(th => {
+  th.addEventListener("click", () => {
+    const key = th.dataset.sort;
+    if (sortState.key === key) sortState.dir *= -1;
+    else sortState = { key, dir: key === "model" ? 1 : -1 };
+    render();
+  });
+});
+
+// live 1-second countdown tick
+setInterval(tickRing, 1000);
+
+// Attempt to reconnect to previously used folder (silent if permission still granted)
+tryAutoConnect().catch(() => {});
+</script>
+</body>
+</html>
